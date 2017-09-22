@@ -6,6 +6,7 @@ const getPixels    = require('get-pixels');
 const Buffer       = require('mutable-buffer');
 const EventEmitter = require('events');
 const Image        = require('./image');
+const utils        = require('./utils');
 const _            = require('./commands');
 
 /**
@@ -21,6 +22,7 @@ function Printer(adapter){
   EventEmitter.call(this);
   this.adapter = adapter;
   this.buffer = new Buffer();
+  this.encoding = 'GB18030';
 };
 
 /**
@@ -98,8 +100,18 @@ Printer.prototype.println = function(content){
  * @return printer instance
  */
 Printer.prototype.text = function(content, encoding){
-  return this.print(iconv.encode(content + _.EOL, encoding || 'GB18030'));
+  return this.print(iconv.encode(content + _.EOL, encoding || this.encoding));
 };
+
+/**
+ * [function encode text]
+ * @param  {[String]}  encoding [description]
+ * @return printer instance
+ */
+Printer.prototype.encode = function(encoding) {
+  this.encoding = encoding;
+  return this;
+}
 
 /**
  * [line feed]
@@ -277,6 +289,17 @@ Printer.prototype.hardware = function(hw){
  * @return printer instance
  */
 Printer.prototype.barcode = function(code, type, width, height, position, font){
+  type = type || 'EAN13'; // default type is EAN13, may a good choice ?
+  var convertCode = String(code), parityBit = '';
+  if(typeof type === 'undefined' || type === null){
+    throw new TypeError('barcode type is required');
+  }
+  if (type === 'EAN13' && convertCode.length != 12) {
+    throw new Error('EAN13 Barcode type requires code length 12');
+  }
+  if (type === 'EAN8' && convertCode.length != 7) {
+    throw new Error('EAN8 Barcode type requires code length 7');
+  }
   if(width >= 2 || width <= 6){
     this.buffer.write(_.BARCODE_FORMAT.BARCODE_WIDTH[width]);
   }else{
@@ -296,7 +319,10 @@ Printer.prototype.barcode = function(code, type, width, height, position, font){
   this.buffer.write(_.BARCODE_FORMAT[
     'BARCODE_' + ((type || 'EAN13').replace('-', '_').toUpperCase())
   ]);
-  this.buffer.write(code);
+  if (type === 'EAN13' || type === 'EAN8') {
+    parityBit = utils.getParityBit(code);
+  }
+  this.buffer.write(code + parityBit);
   return this;
 };
 
@@ -352,7 +378,7 @@ Printer.prototype.qrimage = function(content, options, callback){
  * @return {[type]}         [description]
  */
 Printer.prototype.image = function(image, density){
-  if(!(image instanceof Image)) 
+  if(!(image instanceof Image))
     throw new TypeError('Only escpos.Image supported');
   density = density || 'd24';
   var n = !!~[ 'd8', 's8' ].indexOf(density) ? 1 : 3;
@@ -377,11 +403,11 @@ Printer.prototype.image = function(image, density){
  * @return {[type]}       [description]
  */
 Printer.prototype.raster = function (image, mode) {
-  if(!(image instanceof Image)) 
+  if(!(image instanceof Image))
     throw new TypeError('Only escpos.Image supported');
   mode = mode || 'normal';
-  if (mode === 'dhdw' || 
-      mode === 'dwh'  || 
+  if (mode === 'dhdw' ||
+      mode === 'dwh'  ||
       mode === 'dhw') mode = 'dwdh';
   var raster = image.toRaster();
   var header = _.GSV0_FORMAT['GSV0_' + mode.toUpperCase()];
